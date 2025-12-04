@@ -10,7 +10,11 @@
   "categories": [
     "Other"
   ],
-  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onChatParticipant:CodeReview",
+    "onChatSlashCommand:CodeReview/review"
+  ],
+  "main": "dist/extension.js",
   "contributes": {
     "chatParticipants": [
       {
