@@ -7,8 +7,17 @@ export function activate(context: vscode.ExtensionContext) {
         stream: vscode.ChatResponseStream,
         token: vscode.CancellationToken
     ) => {
-        if (request.command && request.command !== 'review') {
+        const promptText = typeof (request as any).prompt === 'string' ? (request as any).prompt : '';
+        const inferredCommand = promptText.includes('/review') ? 'review' : undefined;
+        const effectiveCommand = request.command ?? inferredCommand;
+
+        if (effectiveCommand && effectiveCommand !== 'review') {
             stream.markdown('请使用 `/review` 命令来触发自动代码审查。');
+            return;
+        }
+
+        if (effectiveCommand !== 'review') {
+            stream.markdown('请发送 `@CodeReview /review` 来触发自动代码审查。');
             return;
         }
 
