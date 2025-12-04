@@ -1,0 +1,39 @@
+{
+  "name": "code-reviewer",
+  "displayName": "Code Reviewer",
+  "description": "A minimal VS Code chat participant that asks Copilot to review the latest Git commit using MCP.",
+  "version": "0.0.1",
+  "publisher": "codereviewer",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onChatParticipant:CodeReview"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Code Reviewer",
+      "properties": {
+        "codeReviewer.rulesFile": {
+          "type": "string",
+          "default": "",
+          "description": "Custom review rules file path relative to the workspace root. Leave empty to use the default rules."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./tsconfig.json",
+    "watch": "tsc -w -p ./tsconfig.json",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.90.0",
+    "typescript": "^5.4.0",
+    "vsce": "^2.15.0"
+  }
+}
