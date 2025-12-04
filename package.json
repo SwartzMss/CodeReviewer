@@ -11,7 +11,8 @@
     "Other"
   ],
   "activationEvents": [
-    "onChatParticipant:CodeReview"
+    "onChatParticipant:CodeReview",
+    "onChatSlashCommand:CodeReview/review"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -27,7 +28,7 @@
         ],
         "slashCommands": [
           {
-            "name": "review",
+            "name": "/review",
             "description": "审查最新的 Git 提交"
           }
         ]
