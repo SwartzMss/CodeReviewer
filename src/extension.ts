@@ -92,17 +92,15 @@ export function activate(context: vscode.ExtensionContext) {
         }
 
         sections.push(
-            '输出格式：',
-            '```json',
-            '{',
-            '  "comments": {',
-            '    "<file path>": [',
-            '      { "line": "<line context>", "message": "[<Severity>] <description>" }',
-            '    ]',
-            '  }',
-            '}',
+            '输出格式：HTML（使用 <table> 列出 file/line/severity/message；line 为实际代码行号的整数；severity 独立字段，取值 ERROR/WARN/INFO，不要在 message 再带 [ERROR] 这类前缀）。',
+            '示例：',
+            '```html',
+            '<table>',
+            '  <tr><th>file</th><th>line</th><th>severity</th><th>message</th></tr>',
+            '  <tr><td>src/foo.ts</td><td>42</td><td>ERROR</td><td>描述...</td></tr>',
+            '</table>',
             '```',
-            '没有问题时请返回 `{"comments": {}}`，重点关注潜在缺陷、风险及遗漏的测试。'
+            '没有问题时请返回一个简单的 HTML 段落，如 `<p>No issues found</p>`，并继续重点关注潜在缺陷、风险及遗漏的测试。'
         );
 
         const messages = [vscode.LanguageModelChatMessage.User(sections.join('\n\n'))];
