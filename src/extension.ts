@@ -48,18 +48,10 @@ export function activate(context: vscode.ExtensionContext) {
         token: vscode.CancellationToken
     ) => {
         const promptText = request.prompt ?? '';
-        // 只提供 review 一个入口：如果没有明确 command，默认执行 review，避免 UI 未注入 slash 命令时无法触发
-        let effectiveCommand = request.command ?? 'review';
-        // 兼容用户手写 /review 且 command 未填充的场景
-        if (!request.command && /(^|\s)\/review\b/i.test(promptText)) {
-            effectiveCommand = 'review';
-            log('根据 prompt 推断为 review 命令');
-        }
 
         log('收到聊天请求', {
             command: request.command,
             prompt: promptText,
-            effectiveCommand,
             hasHistory: chatContext.history.length > 0
         });
 

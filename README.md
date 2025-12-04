@@ -12,7 +12,7 @@
 
 在 Copilot Chat 中输入：
 ```
-@CodeReview /review
+@CodeReview
 ```
 
 ## 输出示例
@@ -42,7 +42,7 @@
 
 ## 基本实现流程
 
-1. 在 Copilot Chat 输入 `@CodeReview /review`。
+1. 在 Copilot Chat 输入 `@CodeReview`（可附带额外说明）。
 2. 扩展执行 `git diff HEAD~1` 读取最近一次提交的差异，并在 60k 字符内截断。
 3. 构建提示词（包含 diff 与输出格式），调用 Copilot 让模型返回 JSON 审查意见。
 4. 将模型的流式响应直接输出到聊天窗口。
@@ -85,7 +85,7 @@ code --install-extension code-reviewer-0.0.1.vsix
 
 # 6. 测试
 # 在任意 git 仓库中提交代码后，打开 Copilot Chat 输入：
-# @CodeReview /review
+# @CodeReview
 ```
 
 ## 调试日志
