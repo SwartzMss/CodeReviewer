@@ -18,6 +18,7 @@
     "chatParticipants": [
       {
         "id": "CodeReview",
+        "name": "CodeReview",
         "fullName": "Code Review",
         "shortName": "CodeReview",
         "description": "AI 代码审查助手",
