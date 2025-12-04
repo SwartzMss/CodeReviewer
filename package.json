@@ -29,7 +29,8 @@
   "scripts": {
     "compile": "tsc -p ./tsconfig.json",
     "watch": "tsc -w -p ./tsconfig.json",
-    "package": "vsce package"
+    "package": "vsce package",
+    "publish": "vsce publish"
   },
   "devDependencies": {
     "@types/vscode": "^1.90.0",
