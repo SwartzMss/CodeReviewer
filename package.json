@@ -23,7 +23,13 @@
         "id": "CodeReview",
         "name": "CodeReview",
         "fullName": "Code Review",
-        "description": "AI 代码审查助手"
+        "description": "AI 代码审查助手",
+        "commands": [
+          {
+            "name": "review",
+            "description": "审查最新的 Git 提交"
+          }
+        ]
       }
     ]
   },
