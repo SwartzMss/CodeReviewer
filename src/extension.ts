@@ -1,13 +1,10 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
-import { promises as fs } from 'fs';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);
 const log = (...args: unknown[]) => console.log('[CodeReview]', ...args);
 const MAX_DIFF_CHARS = 60_000;
-const MAX_RULE_CHARS = 12_000;
 
 interface TextChunk {
     text: string;
@@ -43,20 +40,6 @@ const loadGitDiff = async (cwd: string): Promise<TextChunk> => {
     }
 };
 
-const readRulesContent = async (workspacePath: string, configuredPath: string): Promise<TextChunk> => {
-    const normalizedPath = path.isAbsolute(configuredPath)
-        ? configuredPath
-        : path.join(workspacePath, configuredPath);
-
-    try {
-        const data = await fs.readFile(normalizedPath, 'utf8');
-        return limitText(data.trim(), MAX_RULE_CHARS);
-    } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`无法读取审查规则文件（${configuredPath}）：${message}`);
-    }
-};
-
 export function activate(context: vscode.ExtensionContext) {
     const reviewer = async (
         request: vscode.ChatRequest,
@@ -65,8 +48,10 @@ export function activate(context: vscode.ExtensionContext) {
         token: vscode.CancellationToken
     ) => {
         const promptText = request.prompt ?? '';
-        let effectiveCommand = request.command;
-        if (!effectiveCommand && /\b\/review\b/i.test(promptText)) {
+        // 只提供 review 一个入口：如果没有明确 command，默认执行 review，避免 UI 未注入 slash 命令时无法触发
+        let effectiveCommand = request.command ?? 'review';
+        // 兼容用户手写 /review 且 command 未填充的场景
+        if (!request.command && /(^|\s)\/review\b/i.test(promptText)) {
             effectiveCommand = 'review';
             log('根据 prompt 推断为 review 命令');
         }
@@ -77,17 +62,6 @@ export function activate(context: vscode.ExtensionContext) {
             effectiveCommand,
             hasHistory: chatContext.history.length > 0
         });
-        if (effectiveCommand && effectiveCommand !== 'review') {
-            stream.markdown('请使用 `/review` 命令来触发自动代码审查。');
-            log('拒绝非 review 命令', effectiveCommand);
-            return;
-        }
-
-        if (!effectiveCommand) {
-            stream.markdown('请发送 `@CodeReview /review` 来触发自动代码审查。');
-            log('请求缺少 slash 命令');
-            return;
-        }
 
         const workspace = resolveWorkspaceFolder();
         if (!workspace) {
@@ -95,10 +69,6 @@ export function activate(context: vscode.ExtensionContext) {
             log('未找到 workspace folder');
             return;
         }
-
-        const config = vscode.workspace.getConfiguration('codeReviewer');
-        const rulesFile = (config.get<string>('rulesFile') || '').trim();
-        log('配置', { rulesFile });
 
         let diffChunk: TextChunk;
         try {
@@ -116,18 +86,6 @@ export function activate(context: vscode.ExtensionContext) {
             return;
         }
 
-        let rulesChunk: TextChunk | undefined;
-        if (rulesFile) {
-            try {
-                rulesChunk = await readRulesContent(workspace.uri.fsPath, rulesFile);
-            } catch (error) {
-                const message = error instanceof Error ? error.message : String(error);
-                stream.markdown(message);
-                log('读取规则失败', message);
-                return;
-            }
-        }
-
         const sections: string[] = [
             '你是一名资深且严谨的代码审查专家，需要针对最新一次提交给出结构化 JSON 反馈。',
             '请审查最新一次 Git 提交（`git diff HEAD~1`）并以 JSON 返回审查结果。',
@@ -139,13 +97,6 @@ export function activate(context: vscode.ExtensionContext) {
 
         if (diffChunk.truncated) {
             sections.push(`（Diff 仅包含前 ${MAX_DIFF_CHARS} 个字符）`);
-        }
-
-        if (rulesChunk) {
-            sections.push(`审查规则（来自 ${rulesFile}）：`, '```', rulesChunk.text, '```');
-            if (rulesChunk.truncated) {
-                sections.push(`（规则内容仅截取前 ${MAX_RULE_CHARS} 个字符）`);
-            }
         }
 
         sections.push(

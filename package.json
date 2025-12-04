@@ -4,6 +4,9 @@
   "description": "A minimal VS Code chat participant that asks Copilot to review the latest Git commit using MCP.",
   "version": "0.0.1",
   "publisher": "codereviewer",
+  "enabledApiProposals": [
+    "chatParticipantAdditions"
+  ],
   "engines": {
     "vscode": "^1.90.0"
   },
@@ -20,29 +23,9 @@
         "id": "CodeReview",
         "name": "CodeReview",
         "fullName": "Code Review",
-        "shortName": "CodeReview",
-        "description": "AI 代码审查助手",
-        "inputCapabilities": [
-          "slashCommands"
-        ],
-        "slashCommands": [
-          {
-            "name": "review",
-            "description": "审查最新的 Git 提交"
-          }
-        ]
+        "description": "AI 代码审查助手"
       }
-    ],
-    "configuration": {
-      "title": "Code Reviewer",
-      "properties": {
-        "codeReviewer.rulesFile": {
-          "type": "string",
-          "default": "",
-          "description": "Custom review rules file path relative to the workspace root. Leave empty to use the default rules."
-        }
-      }
-    }
+    ]
   },
   "scripts": {
     "compile": "tsc -p ./tsconfig.json",
