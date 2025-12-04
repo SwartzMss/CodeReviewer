@@ -11,8 +11,7 @@
     "Other"
   ],
   "activationEvents": [
-    "onChatParticipant:CodeReview",
-    "onChatSlashCommand:CodeReview/review"
+    "onChatParticipant:CodeReview"
   ],
   "main": "dist/extension.js",
   "contributes": {
