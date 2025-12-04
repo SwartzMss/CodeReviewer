@@ -64,18 +64,26 @@ export function activate(context: vscode.ExtensionContext) {
         stream: vscode.ChatResponseStream,
         token: vscode.CancellationToken
     ) => {
+        const promptText = request.prompt ?? '';
+        let effectiveCommand = request.command;
+        if (!effectiveCommand && /\b\/review\b/i.test(promptText)) {
+            effectiveCommand = 'review';
+            log('根据 prompt 推断为 review 命令');
+        }
+
         log('收到聊天请求', {
             command: request.command,
-            prompt: request.prompt,
+            prompt: promptText,
+            effectiveCommand,
             hasHistory: chatContext.history.length > 0
         });
-        if (request.command && request.command !== 'review') {
+        if (effectiveCommand && effectiveCommand !== 'review') {
             stream.markdown('请使用 `/review` 命令来触发自动代码审查。');
-            log('拒绝非 review 命令', request.command);
+            log('拒绝非 review 命令', effectiveCommand);
             return;
         }
 
-        if (!request.command) {
+        if (!effectiveCommand) {
             stream.markdown('请发送 `@CodeReview /review` 来触发自动代码审查。');
             log('请求缺少 slash 命令');
             return;
