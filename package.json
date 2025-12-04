@@ -15,6 +15,23 @@
   ],
   "main": "./dist/extension.js",
   "contributes": {
+    "chatParticipants": [
+      {
+        "id": "CodeReview",
+        "fullName": "Code Review",
+        "shortName": "CodeReview",
+        "description": "AI 代码审查助手",
+        "inputCapabilities": [
+          "slashCommands"
+        ],
+        "slashCommands": [
+          {
+            "name": "review",
+            "description": "审查最新的 Git 提交"
+          }
+        ]
+      }
+    ],
     "configuration": {
       "title": "Code Reviewer",
       "properties": {
