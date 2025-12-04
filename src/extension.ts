@@ -1,10 +1,13 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);
 const log = (...args: unknown[]) => console.log('[CodeReview]', ...args);
 const MAX_DIFF_CHARS = 60_000;
+const MAX_CHECKLIST_CHARS = 20_000;
 
 interface TextChunk {
     text: string;
@@ -21,6 +24,31 @@ const limitText = (input: string, limit: number): TextChunk => {
 const resolveWorkspaceFolder = (): vscode.WorkspaceFolder | undefined => {
     const [workspace] = vscode.workspace.workspaceFolders ?? [];
     return workspace;
+};
+
+const loadChecklistFiles = async (workspacePath: string, files: string[]) => {
+    const checklists: { label: string; content: TextChunk }[] = [];
+
+    for (const rawPath of files) {
+        const filePath = rawPath?.trim();
+        if (!filePath) continue;
+
+        const resolved = path.isAbsolute(filePath)
+            ? filePath
+            : path.join(workspacePath, filePath);
+
+        try {
+            const content = await fs.readFile(resolved, 'utf8');
+            checklists.push({
+                label: filePath,
+                content: limitText(content, MAX_CHECKLIST_CHARS)
+            });
+        } catch (error) {
+            log('检查清单文件读取失败', { filePath, error });
+        }
+    }
+
+    return checklists;
 };
 
 const loadGitDiff = async (cwd: string): Promise<TextChunk> => {
@@ -62,6 +90,9 @@ export function activate(context: vscode.ExtensionContext) {
             return;
         }
 
+        const configuration = vscode.workspace.getConfiguration('codeReviewer');
+        const checklistFiles = configuration.get<string[]>('checklistFiles') ?? [];
+
         let diffChunk: TextChunk;
         try {
             diffChunk = await loadGitDiff(workspace.uri.fsPath);
@@ -78,6 +109,10 @@ export function activate(context: vscode.ExtensionContext) {
             return;
         }
 
+        const checklistChunks = checklistFiles.length
+            ? await loadChecklistFiles(workspace.uri.fsPath, checklistFiles)
+            : [];
+
         const sections: string[] = [
             '你是一名资深且严谨的代码审查专家，需要针对最新一次提交给出结构化 JSON 反馈。',
             '请审查最新一次 Git 提交（`git diff HEAD~1`）并以 JSON 返回审查结果。',
@@ -86,6 +121,21 @@ export function activate(context: vscode.ExtensionContext) {
             diffChunk.text,
             '```'
         ];
+
+        if (checklistChunks.length) {
+            sections.push('以下是需要优先关注的审查检查清单：');
+            for (const item of checklistChunks) {
+                sections.push(
+                    `文件 ${item.label}：`,
+                    '```markdown',
+                    item.content.text,
+                    '```'
+                );
+                if (item.content.truncated) {
+                    sections.push('（检查清单内容已截断，超出部分未包含）');
+                }
+            }
+        }
 
         if (diffChunk.truncated) {
             sections.push(`（Diff 仅包含前 ${MAX_DIFF_CHARS} 个字符）`);
@@ -112,10 +162,23 @@ export function activate(context: vscode.ExtensionContext) {
         try {
             const response = await request.model.sendRequest(messages, options, token);
             log('已发送请求至模型');
+            let htmlContent = '';
             for await (const fragment of response.text) {
-                stream.markdown(fragment);
+                htmlContent += fragment;
             }
-            log('模型返回完成');
+
+            const fileName = `code-review-report-${Date.now()}.html`;
+            const filePath = path.join(workspace.uri.fsPath, fileName);
+
+            try {
+                await fs.writeFile(filePath, htmlContent, 'utf8');
+                stream.markdown(`审查完成，报告已保存：\`${filePath}\``);
+                log('模型返回完成，已写入文件', filePath);
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                stream.markdown(`审查生成成功，但保存文件失败：${message}`);
+                log('写入报告失败', { filePath, message });
+            }
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             stream.markdown(`无法完成审查：${message}`);

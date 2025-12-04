@@ -31,7 +31,20 @@
           }
         ]
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Code Reviewer",
+      "properties": {
+        "codeReviewer.checklistFiles": {
+          "type": "array",
+          "markdownDescription": "要附加到审查提示中的检查清单文件路径列表，支持相对工作区或绝对路径，建议使用 Markdown。",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        }
+      }
+    }
   },
   "scripts": {
     "compile": "tsc -p ./tsconfig.json",
