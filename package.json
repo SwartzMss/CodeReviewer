@@ -10,10 +10,6 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [
-    "onChatParticipant:CodeReview",
-    "onChatSlashCommand:CodeReview/review"
-  ],
   "main": "./dist/extension.js",
   "contributes": {
     "chatParticipants": [
@@ -28,7 +24,7 @@
         ],
         "slashCommands": [
           {
-            "name": "/review",
+            "name": "review",
             "description": "审查最新的 Git 提交"
           }
         ]
@@ -51,6 +47,7 @@
     "package": "vsce package"
   },
   "devDependencies": {
+    "@types/node": "^24.10.1",
     "@types/vscode": "^1.90.0",
     "typescript": "^5.4.0",
     "vsce": "^2.15.0"
