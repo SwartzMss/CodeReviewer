@@ -5,6 +5,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);
+const log = (...args: unknown[]) => console.log('[CodeReview]', ...args);
 const MAX_DIFF_CHARS = 60_000;
 const MAX_RULE_CHARS = 12_000;
 
@@ -63,24 +64,33 @@ export function activate(context: vscode.ExtensionContext) {
         stream: vscode.ChatResponseStream,
         token: vscode.CancellationToken
     ) => {
+        log('收到聊天请求', {
+            command: request.command,
+            prompt: request.prompt,
+            hasHistory: chatContext.history.length > 0
+        });
         if (request.command && request.command !== 'review') {
             stream.markdown('请使用 `/review` 命令来触发自动代码审查。');
+            log('拒绝非 review 命令', request.command);
             return;
         }
 
         if (!request.command) {
             stream.markdown('请发送 `@CodeReview /review` 来触发自动代码审查。');
+            log('请求缺少 slash 命令');
             return;
         }
 
         const workspace = resolveWorkspaceFolder();
         if (!workspace) {
             stream.markdown('请先在 VS Code 中打开一个 Git 仓库再运行审查。');
+            log('未找到 workspace folder');
             return;
         }
 
         const config = vscode.workspace.getConfiguration('codeReviewer');
         const rulesFile = (config.get<string>('rulesFile') || '').trim();
+        log('配置', { rulesFile });
 
         let diffChunk: TextChunk;
         try {
@@ -88,11 +98,13 @@ export function activate(context: vscode.ExtensionContext) {
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             stream.markdown(message);
+            log('git diff 获取失败', message);
             return;
         }
 
         if (!diffChunk.text) {
             stream.markdown('未检测到最近一次提交的差异，请确认有新的更改后再试。');
+            log('git diff 为空');
             return;
         }
 
@@ -103,6 +115,7 @@ export function activate(context: vscode.ExtensionContext) {
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
                 stream.markdown(message);
+                log('读取规则失败', message);
                 return;
             }
         }
@@ -149,12 +162,15 @@ export function activate(context: vscode.ExtensionContext) {
 
         try {
             const response = await request.model.sendRequest(messages, options, token);
+            log('已发送请求至模型');
             for await (const fragment of response.text) {
                 stream.markdown(fragment);
             }
+            log('模型返回完成');
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             stream.markdown(`无法完成审查：${message}`);
+            log('模型请求失败', message);
         }
     };
 
