@@ -279,6 +279,15 @@ code --install-extension code-reviewer-0.0.1.vsix
 # @CodeReview /review
 ```
 
+## 调试日志
+
+安装 VSIX 后如果在 Copilot Chat 无法使用 `@CodeReview` 或命令无响应，可通过以下方式查看日志：
+
+- 在 VS Code 中打开 `查看 → 输出`，右上角选择 `Log (Extension Host)`，可以看到扩展激活和注册参与者相关的错误。
+- 按 `Ctrl+Shift+P`，输入 `Developer: Toggle Developer Tools` 打开开发者工具，在 Console 面板查看详细报错。
+
+把这些日志分享出来有助于快速定位扩展加载或 MCP 调用问题。
+
 ## FAQ
 
 **Q: 为什么输出的是 JSON 格式？**  
