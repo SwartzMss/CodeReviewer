@@ -1,6 +1,6 @@
 {
   "name": "code-reviewer",
-  "displayName": "个性化代码审查助手",
+  "displayName": "Code Reviewer",
   "description": "A customizable VS Code chat participant that lists diff files, honors per-user checklists, and asks Copilot to review the latest Git commit using MCP.",
   "version": "0.0.1",
   "publisher": "codereviewer",
