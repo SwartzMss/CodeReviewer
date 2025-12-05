@@ -249,16 +249,13 @@ export function activate(context: vscode.ExtensionContext) {
             return;
         }
 
-        stream.markdown('Diff 上下文已由模型整理，输出如下：');
-        stream.markdown(trimmedPrepared);
-        log('模型准备的 diff 内容：', trimmedPrepared);
+        stream.markdown('Diff 上下文已由模型整理，开始进入正式审查。');
 
         if (trimmedPrepared.includes('<p>No changes detected</p>')) {
+            stream.markdown('<p>No changes detected</p>');
             log('模型判定无更改，审查结束');
             return;
         }
-
-        stream.markdown('将上述 diff 交给模型进行正式审查。');
 
         const reviewSections: string[] = [
             '你是一名资深且严谨的代码审查专家，需要针对最新一次提交给出结构化 JSON 反馈。',
