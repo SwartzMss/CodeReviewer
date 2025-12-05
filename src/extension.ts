@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import * as os from 'os';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
@@ -77,11 +78,122 @@ interface TextChunk {
     truncated: boolean;
 }
 
+interface DiffFilterResult {
+    text: string;
+    includedFiles: string[];
+    excludedFiles: string[];
+    allFiles: string[];
+}
+
+const DEFAULT_CHECKLIST = `# 默认检查清单
+
+- [ ] 关键业务路径是否包含充分的单元或集成测试？
+- [ ] 是否存在潜在的空指针 / 异常未处理？
+- [ ] 重要配置或边界条件是否有防御性校验？
+- [ ] 异常或日志信息是否足够诊断问题？
+- [ ] 是否有潜在的性能或并发隐患需要进一步评估？
+`;
+
 const limitText = (input: string, limit: number): TextChunk => {
     if (input.length <= limit) {
         return { text: input, truncated: false };
     }
     return { text: input.slice(0, limit), truncated: true };
+};
+
+const normalizeRelativePath = (workspacePath: string, inputPath: string): string | undefined => {
+    const trimmed = inputPath?.trim();
+    if (!trimmed) {
+        return undefined;
+    }
+
+    const relative = path.isAbsolute(trimmed)
+        ? path.relative(workspacePath, trimmed)
+        : trimmed.replace(/^\.\/+/, '');
+
+    const normalized = relative
+        .replace(/\\/g, '/')
+        .replace(/^\.\/+/, '')
+        .replace(/^\/+/, '')
+        .replace(/\/+$/, '');
+
+    return normalized || undefined;
+};
+
+const buildExclusionList = (workspacePath: string, paths: string[]): string[] => {
+    return Array.from(
+        new Set(
+            paths
+                .map(item => normalizeRelativePath(workspacePath, item))
+                .filter((item): item is string => Boolean(item))
+        )
+    );
+};
+
+const shouldExcludeFile = (filePath: string, exclusions: string[]): boolean => {
+    if (!exclusions.length) {
+        return false;
+    }
+
+    const normalized = filePath.replace(/\\/g, '/').replace(/^\.\/+/, '');
+    return exclusions.some(pattern => {
+        if (normalized === pattern) {
+            return true;
+        }
+        return normalized.startsWith(`${pattern}/`);
+    });
+};
+
+const filterDiffByPaths = (
+    diffText: string,
+    workspacePath: string,
+    rawExclusions: string[]
+): DiffFilterResult => {
+    const exclusions = buildExclusionList(workspacePath, rawExclusions);
+    const regex = /^diff --git a\/(.+) b\/(.+)$/gm;
+    const matches: { index: number; filePath: string }[] = [];
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(diffText)) !== null) {
+        matches.push({ index: match.index, filePath: match[2] ?? match[1] ?? '' });
+    }
+
+    if (!matches.length) {
+        return { text: diffText, excludedFiles: [], includedFiles: [], allFiles: [] };
+    }
+
+    const filteredParts: string[] = [];
+    const excludedFiles = new Set<string>();
+    const includedFiles = new Set<string>();
+    const allFiles = new Set<string>();
+
+    if (matches[0].index > 0) {
+        filteredParts.push(diffText.slice(0, matches[0].index));
+    }
+
+    for (let i = 0; i < matches.length; i++) {
+        const start = matches[i].index;
+        const end = i + 1 < matches.length ? matches[i + 1].index : diffText.length;
+        const chunk = diffText.slice(start, end);
+        const filePath = matches[i].filePath.replace(/^\.\/+/, '');
+        allFiles.add(filePath);
+
+        if (shouldExcludeFile(filePath, exclusions)) {
+            excludedFiles.add(filePath);
+            continue;
+        }
+
+        includedFiles.add(filePath);
+        filteredParts.push(chunk);
+    }
+
+    const outputText = exclusions.length ? filteredParts.join('') : diffText;
+
+    return {
+        text: outputText,
+        excludedFiles: Array.from(excludedFiles),
+        includedFiles: Array.from(includedFiles.size ? includedFiles : allFiles),
+        allFiles: Array.from(allFiles)
+    };
 };
 
 const resolveWorkspaceFolder = (): vscode.WorkspaceFolder | undefined => {
@@ -173,6 +285,7 @@ export function activate(context: vscode.ExtensionContext) {
 
         const configuration = vscode.workspace.getConfiguration('codeReviewer');
         const checklistFiles = configuration.get<string[]>('checklistFiles') ?? [];
+        const excludePaths = configuration.get<string[]>('excludePaths') ?? [];
 
         let diffChunk: TextChunk;
         try {
@@ -184,15 +297,79 @@ export function activate(context: vscode.ExtensionContext) {
             return;
         }
 
-        if (!diffChunk.text) {
-            stream.markdown('未检测到最近一次提交的差异，请确认有新的更改后再试。');
-            log('git diff 为空');
+        const filteredDiff = filterDiffByPaths(diffChunk.text, workspace.uri.fsPath, excludePaths);
+        if (filteredDiff.excludedFiles.length) {
+            log('根据配置排除了部分 diff 文件', filteredDiff.excludedFiles);
+        }
+
+        if (filteredDiff.allFiles.length) {
+            const includedList = filteredDiff.includedFiles.length
+                ? filteredDiff.includedFiles.map(file => `- ${file}`).join('\n')
+                : '- （无）';
+            const excludedList = filteredDiff.excludedFiles.length
+                ? filteredDiff.excludedFiles.map(file => `- ${file}`).join('\n')
+                : '- （无）';
+            const summaryMarkdown = [
+                '### Diff 文件概览',
+                `- 总文件数：${filteredDiff.allFiles.length}`,
+                `- 参与审查（${filteredDiff.includedFiles.length}）：`,
+                includedList,
+                `- 已排除（${filteredDiff.excludedFiles.length}）：`,
+                excludedList
+            ].join('\n');
+            stream.markdown(summaryMarkdown);
+        } else {
+            stream.markdown('未能解析出 diff 文件列表，请确认最近一次提交包含文件变更。');
+        }
+
+        const summaryPayload = {
+            generatedAt: new Date().toISOString(),
+            workspace: workspace.uri.fsPath,
+            allFiles: filteredDiff.allFiles,
+            includedFiles: filteredDiff.includedFiles,
+            excludedFiles: filteredDiff.excludedFiles
+        };
+        const summaryFilePath = path.join(
+            os.tmpdir(),
+            `code-review-files-${Date.now()}.json`
+        );
+        try {
+            await fs.writeFile(summaryFilePath, JSON.stringify(summaryPayload, null, 2), 'utf8');
+            stream.markdown(`文件概览已保存到临时文件：\`${summaryFilePath}\``);
+            log('文件概览已写入临时文件', summaryFilePath);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            log('写入临时文件失败', message);
+        }
+
+        diffChunk = { text: filteredDiff.text, truncated: diffChunk.truncated };
+
+        if (!diffChunk.text.trim()) {
+            const message = excludePaths.length
+                ? '未检测到有效差异：所有更改都匹配 codeReviewer.excludePaths 配置。'
+                : '未检测到最近一次提交的差异，请确认有新的更改后再试。';
+            stream.markdown(message);
+            log('有效 diff 为空');
             return;
         }
 
-        const checklistChunks = checklistFiles.length
-            ? await loadChecklistFiles(workspace.uri.fsPath, checklistFiles)
-            : [];
+        let checklistChunks: { label: string; content: TextChunk }[] = [];
+        if (checklistFiles.length) {
+            const checklistSummary = [
+                '将加载以下检查清单：',
+                ...checklistFiles.map(file => `- ${file}`)
+            ].join('\n');
+            stream.markdown(checklistSummary);
+            checklistChunks = await loadChecklistFiles(workspace.uri.fsPath, checklistFiles);
+        } else {
+            stream.markdown('未配置检查清单，已加载默认检查清单。');
+            checklistChunks = [
+                {
+                    label: '默认检查清单',
+                    content: limitText(DEFAULT_CHECKLIST, MAX_CHECKLIST_CHARS)
+                }
+            ];
+        }
 
         const sections: string[] = [
             '你是一名资深且严谨的代码审查专家，需要针对最新一次提交给出结构化 JSON 反馈。',

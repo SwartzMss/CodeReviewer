@@ -1,7 +1,7 @@
 {
   "name": "code-reviewer",
-  "displayName": "Code Reviewer",
-  "description": "A minimal VS Code chat participant that asks Copilot to review the latest Git commit using MCP.",
+  "displayName": "个性化代码审查助手",
+  "description": "A customizable VS Code chat participant that lists diff files, honors per-user checklists, and asks Copilot to review the latest Git commit using MCP.",
   "version": "0.0.1",
   "publisher": "codereviewer",
   "enabledApiProposals": [
@@ -38,6 +38,14 @@
         "codeReviewer.checklistFiles": {
           "type": "array",
           "markdownDescription": "要附加到审查提示中的检查清单文件路径列表，支持相对工作区或绝对路径，建议使用 Markdown。",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "codeReviewer.excludePaths": {
+          "type": "array",
+          "markdownDescription": "需要从 git diff 中排除的文件或目录路径列表，支持相对工作区或绝对路径；目录会匹配其下的所有文件。",
           "items": {
             "type": "string"
           },
