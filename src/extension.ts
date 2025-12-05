@@ -1,15 +1,8 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import * as os from 'os';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-
-const execAsync = promisify(exec);
 const log = (...args: unknown[]) => console.log('[CodeReview]', ...args);
-const MAX_DIFF_CHARS = 60_000;
 const MAX_CHECKLIST_CHARS = 20_000;
-const CPP_FILE_EXTENSIONS = ['.cc', '.cpp', '.cxx', '.h', '.hh', '.hpp', '.hxx'];
 const CPP_REVIEW_GUIDELINES = `# Role: C++ Code Reviewer
 
 ## Profile
@@ -73,18 +66,6 @@ const CPP_REVIEW_GUIDELINES = `# Role: C++ Code Reviewer
 - For complex issues (e.g., related to Design of Context Management), provide a clear, complete, working solution
 - Prioritize issues by severity within their category and focus on concrete, actionable recommendations`;
 
-interface TextChunk {
-    text: string;
-    truncated: boolean;
-}
-
-interface DiffFilterSummary {
-    includedFiles: string[];
-    excludedFiles: string[];
-    allFiles: string[];
-    exclusionPatterns: string[];
-}
-
 const DEFAULT_CHECKLIST = `# 默认检查清单
 
 - [ ] 关键业务路径是否包含充分的单元或集成测试？
@@ -94,7 +75,7 @@ const DEFAULT_CHECKLIST = `# 默认检查清单
 - [ ] 是否有潜在的性能或并发隐患需要进一步评估？
 `;
 
-const limitText = (input: string, limit: number): TextChunk => {
+const limitText = (input: string, limit: number): { text: string; truncated: boolean } => {
     if (input.length <= limit) {
         return { text: input, truncated: false };
     }
@@ -130,81 +111,13 @@ const buildExclusionList = (workspacePath: string, paths: string[]): string[] =>
     );
 };
 
-const shouldExcludeFile = (filePath: string, exclusions: string[]): boolean => {
-    if (!exclusions.length) {
-        return false;
-    }
-
-    const normalized = filePath.replace(/\\/g, '/').replace(/^\.\/+/, '');
-    return exclusions.some(pattern => {
-        if (normalized === pattern) {
-            return true;
-        }
-        return normalized.startsWith(`${pattern}/`);
-    });
-};
-
-const summarizeDiffByPaths = (
-    diffText: string,
-    workspacePath: string,
-    rawExclusions: string[],
-    knownAllFiles: string[] = []
-): DiffFilterSummary => {
-    const exclusions = buildExclusionList(workspacePath, rawExclusions);
-    const regex = /^diff --git a\/(.+) b\/(.+)$/gm;
-    const matches: { index: number; filePath: string }[] = [];
-    let match: RegExpExecArray | null;
-    while ((match = regex.exec(diffText)) !== null) {
-        matches.push({ index: match.index, filePath: match[2] ?? match[1] ?? '' });
-    }
-
-    const excludedFiles = new Set<string>();
-    const includedFiles = new Set<string>();
-    const normalizedKnownFiles = Array.from(
-        new Set(
-            knownAllFiles
-                .map(file => file?.trim())
-                .filter((file): file is string => Boolean(file))
-                .map(file => file.replace(/\\/g, '/').replace(/^\.\/+/, ''))
-        )
-    );
-    const allFiles = new Set<string>(normalizedKnownFiles);
-
-    for (const file of normalizedKnownFiles) {
-        if (shouldExcludeFile(file, exclusions)) {
-            excludedFiles.add(file);
-        } else {
-            includedFiles.add(file);
-        }
-    }
-
-    for (let i = 0; i < matches.length; i++) {
-        const filePath = matches[i].filePath.replace(/\\/g, '/').replace(/^\.\/+/, '');
-        allFiles.add(filePath);
-
-        if (shouldExcludeFile(filePath, exclusions)) {
-            excludedFiles.add(filePath);
-            continue;
-        }
-
-        includedFiles.add(filePath);
-    }
-
-    return {
-        excludedFiles: Array.from(excludedFiles),
-        includedFiles: Array.from(includedFiles.size ? includedFiles : allFiles),
-        allFiles: Array.from(allFiles),
-        exclusionPatterns: exclusions
-    };
-};
-
 const resolveWorkspaceFolder = (): vscode.WorkspaceFolder | undefined => {
     const [workspace] = vscode.workspace.workspaceFolders ?? [];
     return workspace;
 };
 
 const loadChecklistFiles = async (workspacePath: string, files: string[]) => {
-    const checklists: { label: string; content: TextChunk }[] = [];
+    const checklists: { label: string; content: { text: string; truncated: boolean } }[] = [];
 
     for (const rawPath of files) {
         const filePath = rawPath?.trim();
@@ -226,58 +139,6 @@ const loadChecklistFiles = async (workspacePath: string, files: string[]) => {
     }
 
     return checklists;
-};
-
-const loadGitDiff = async (cwd: string): Promise<TextChunk> => {
-    try {
-        const { stdout } = await execAsync('git diff HEAD~1', {
-            cwd,
-            maxBuffer: 10 * 1024 * 1024
-        });
-        const diff = stdout.trim();
-        if (!diff) {
-            return { text: '', truncated: false };
-        }
-        return limitText(diff, MAX_DIFF_CHARS);
-    } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`无法获取 Git diff：${message}`);
-    }
-};
-
-const loadDiffFileList = async (cwd: string): Promise<string[]> => {
-    try {
-        const { stdout } = await execAsync('git diff --name-only HEAD~1', {
-            cwd,
-            maxBuffer: 1 * 1024 * 1024
-        });
-        return stdout
-            .split('\n')
-            .map(line => line.trim())
-            .filter(Boolean)
-            .map(line => line.replace(/\\/g, '/').replace(/^\.\/+/, ''));
-    } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`无法获取 Git diff 文件列表：${message}`);
-    }
-};
-
-const diffContainsCppChanges = (diffText: string): boolean => {
-    const matches = diffText.match(/^\+\+\+ b\/(.+)$/gm);
-    if (!matches) {
-        return false;
-    }
-
-    for (const line of matches) {
-        const filePath = line.replace(/^\+\+\+ b\//, '').split('\t')[0];
-        if (filePath === '/dev/null') {
-            continue;
-        }
-        if (CPP_FILE_EXTENSIONS.some(ext => filePath.endsWith(ext))) {
-            return true;
-        }
-    }
-    return false;
 };
 
 export function activate(context: vscode.ExtensionContext) {
@@ -305,88 +166,12 @@ export function activate(context: vscode.ExtensionContext) {
         const configuration = vscode.workspace.getConfiguration('codeReviewer');
         const checklistFiles = configuration.get<string[]>('checklistFiles') ?? [];
         const excludePaths = configuration.get<string[]>('excludePaths') ?? [];
-
-        let diffChunk: TextChunk;
-        let diffFiles: string[];
-        try {
-            [diffChunk, diffFiles] = await Promise.all([
-                loadGitDiff(workspace.uri.fsPath),
-                loadDiffFileList(workspace.uri.fsPath)
-            ]);
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            stream.markdown(message);
-            log('git diff 数据获取失败', message);
-            return;
+        const exclusionPatterns = buildExclusionList(workspace.uri.fsPath, excludePaths);
+        if (exclusionPatterns.length) {
+            log('已加载 diff 排除规则', exclusionPatterns);
         }
 
-        const diffSummary = summarizeDiffByPaths(
-            diffChunk.text,
-            workspace.uri.fsPath,
-            excludePaths,
-            diffFiles
-        );
-        if (diffSummary.excludedFiles.length) {
-            log('根据配置排除了部分 diff 文件（交由模型忽略）', diffSummary.excludedFiles);
-        }
-
-        if (diffSummary.allFiles.length) {
-            const includedList = diffSummary.includedFiles.length
-                ? diffSummary.includedFiles.map(file => `- ${file}`).join('\n')
-                : '- （无）';
-            const excludedList = diffSummary.excludedFiles.length
-                ? diffSummary.excludedFiles.map(file => `- ${file}`).join('\n')
-                : '- （无）';
-            const summaryMarkdown = [
-                '### Diff 文件概览',
-                `- 总文件数：${diffSummary.allFiles.length}`,
-                `- 参与审查（${diffSummary.includedFiles.length}）：`,
-                includedList,
-                `- 已排除（${diffSummary.excludedFiles.length}）：`,
-                excludedList
-            ].join('\n');
-            stream.markdown(summaryMarkdown);
-        } else {
-            stream.markdown('未能解析出 diff 文件列表，请确认最近一次提交包含文件变更。');
-        }
-
-        const summaryPayload = {
-            generatedAt: new Date().toISOString(),
-            workspace: workspace.uri.fsPath,
-            allFiles: diffSummary.allFiles,
-            includedFiles: diffSummary.includedFiles,
-            excludedFiles: diffSummary.excludedFiles,
-            exclusionPatterns: diffSummary.exclusionPatterns
-        };
-        const summaryFilePath = path.join(
-            os.tmpdir(),
-            `code-review-files-${Date.now()}.json`
-        );
-        try {
-            await fs.writeFile(summaryFilePath, JSON.stringify(summaryPayload, null, 2), 'utf8');
-            stream.markdown(`文件概览已保存到临时文件：\`${summaryFilePath}\``);
-            log('文件概览已写入临时文件', summaryFilePath);
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            log('写入临时文件失败', message);
-        }
-
-        if (!diffSummary.includedFiles.length) {
-            const message = diffSummary.exclusionPatterns.length
-                ? '所有 diff 文件都匹配 codeReviewer.excludePaths 配置，已跳过审查。'
-                : '未检测到需要审查的 diff 文件。';
-            stream.markdown(message);
-            log('没有可供审查的 diff 文件，跳过。');
-            return;
-        }
-
-        if (!diffChunk.text.trim()) {
-            stream.markdown('未检测到最近一次提交的差异，请确认有新的更改后再试。');
-            log('有效 diff 为空');
-            return;
-        }
-
-        let checklistChunks: { label: string; content: TextChunk }[] = [];
+        let checklistChunks: { label: string; content: { text: string; truncated: boolean } }[] = [];
         if (checklistFiles.length) {
             const checklistSummary = [
                 '将加载以下检查清单：',
@@ -404,75 +189,102 @@ export function activate(context: vscode.ExtensionContext) {
             ];
         }
 
-        const sections: string[] = [
-            '你是一名资深且严谨的代码审查专家，需要针对最新一次提交给出结构化 JSON 反馈。',
-            '请审查最新一次 Git 提交（`git diff HEAD~1`）并以 JSON 返回审查结果。'
+        const preparationSections: string[] = [
+            '你是一名资深的仓库助手，负责准备最新一次提交的 diff 上下文。',
+            '请严格按照以下步骤操作，不要提前给出审查意见：',
+            '1. 在仓库根目录运行：',
+            '```sh',
+            'git diff HEAD~1',
+            'git diff --name-only HEAD~1',
+            '```',
+            '2. 若任一命令无输出或仅返回空白，直接回复 `<p>No changes detected</p>` 并停止。',
+            '3. 若命令成功返回，请根据排除规则过滤文件，只保留允许的 diff 内容，然后总结输出。'
         ];
 
-        sections.push(
-            '### 文件过滤与整理规则',
-            '在阅读 diff 前，请先根据以下要求整理出需要审查的文件：',
-            '1. 仅对 `includedFiles` 中列出的文件给出审查意见；',
-            '2. `excludedFiles` 中的文件由配置排除，只能作为上下文，必须忽略其缺陷；',
-            '3. 如果 diff 中出现不在 `allFiles` 列表中的文件，可视为额外上下文，仍需先判断其是否匹配排除模式。'
-        );
-
-        if (diffSummary.exclusionPatterns.length) {
-            sections.push(
+        if (exclusionPatterns.length) {
+            preparationSections.push(
                 '当前排除模式（相对工作区根目录）：',
                 '```json',
-                JSON.stringify(diffSummary.exclusionPatterns, null, 2),
-                '```'
+                JSON.stringify(exclusionPatterns, null, 2),
+                '```',
+                '命中这些模式的文件必须完全忽略。'
             );
         } else {
-            sections.push('当前未配置额外的排除模式。');
+            preparationSections.push('当前无额外排除模式，可覆盖所有文件。');
         }
 
-        sections.push(
-            '以下为此次 diff 的文件分类，请先据此整理：',
-            '```json',
-            JSON.stringify(
-                {
-                    allFiles: diffSummary.allFiles,
-                    includedFiles: diffSummary.includedFiles,
-                    excludedFiles: diffSummary.excludedFiles
-                },
-                null,
-                2
-            ),
-            '```',
-            '整理完成后再进入正式审查流程。'
+        preparationSections.push(
+            '### 输出要求',
+            '- 首先列出总文件数、被排除文件数以及最终保留的文件列表；',
+            '- 接着给出一个 ` ```diff ` 代码块，包含过滤后的完整 diff；',
+            '- 如有必要，可附上额外说明或统计信息，但禁止进入正式代码审查。'
         );
 
-        if (diffContainsCppChanges(diffChunk.text)) {
-            sections.push(
-                '若 Diff 中包含 C++ 文件，请默认遵循以下审查标准：',
-                CPP_REVIEW_GUIDELINES
-            );
+        const preparationMessages = [
+            vscode.LanguageModelChatMessage.User(preparationSections.join('\n\n'))
+        ];
+
+        const options: vscode.LanguageModelChatRequestOptions = {
+            justification: '需要访问仓库上下文以提取 diff' // first phase
+        };
+
+        let preparedDiff = '';
+        try {
+            const response = await request.model.sendRequest(preparationMessages, options, token);
+            log('已请求模型准备 diff');
+            for await (const fragment of response.text) {
+                preparedDiff += fragment;
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            stream.markdown(`无法准备 diff：${message}`);
+            log('模型准备 diff 失败', message);
+            return;
         }
 
-        sections.push('Diff 如下：', '```diff', diffChunk.text, '```');
+        const trimmedPrepared = preparedDiff.trim();
+        if (!trimmedPrepared) {
+            stream.markdown('模型未返回任何 diff 内容，终止审查。');
+            log('模型 diff 输出为空');
+            return;
+        }
+
+        stream.markdown('Diff 上下文已由模型整理，开始进入正式审查。');
+
+        if (trimmedPrepared.includes('<p>No changes detected</p>')) {
+            stream.markdown('<p>No changes detected</p>');
+            log('模型判定无更改，审查结束');
+            return;
+        }
+
+        const reviewSections: string[] = [
+            '你是一名资深且严谨的代码审查专家，需要针对最新一次提交给出结构化 JSON 反馈。',
+            '请基于下面已经整理好的 diff 内容进行审查，无需再次运行命令。'
+        ];
+
+        reviewSections.push('以下为准备好的 diff：', trimmedPrepared);
 
         if (checklistChunks.length) {
-            sections.push('以下是需要优先关注的审查检查清单：');
+            reviewSections.push('以下是需要优先关注的审查检查清单：');
             for (const item of checklistChunks) {
-                sections.push(
+                reviewSections.push(
                     `文件 ${item.label}：`,
                     '```markdown',
                     item.content.text,
                     '```'
                 );
                 if (item.content.truncated) {
-                    sections.push('（检查清单内容已截断，超出部分未包含）');
+                    reviewSections.push('（检查清单内容已截断，超出部分未包含）');
                 }
             }
         }
 
-        if (diffChunk.truncated) {
-            sections.push(`（Diff 仅包含前 ${MAX_DIFF_CHARS} 个字符）`);
-        }
+        reviewSections.push(
+            '若 diff 中包含 C++ 文件（扩展名 .cc/.cpp/.cxx/.h/.hh/.hpp/.hxx），请遵循以下额外审查准则：',
+            CPP_REVIEW_GUIDELINES
+        );
 
-        sections.push(
+        reviewSections.push(
             '输出格式：HTML（使用 <table> 列出 file/line/severity/message；line 为实际代码行号的整数；severity 独立字段，取值 ERROR/WARN/INFO，不要在 message 再带 [ERROR] 这类前缀）。',
             '示例：',
             '```html',
@@ -484,15 +296,17 @@ export function activate(context: vscode.ExtensionContext) {
             '没有问题时请返回一个简单的 HTML 段落，如 `<p>No issues found</p>`，并继续重点关注潜在缺陷、风险及遗漏的测试。'
         );
 
-        const messages = [vscode.LanguageModelChatMessage.User(sections.join('\n\n'))];
+        const reviewMessages = [
+            vscode.LanguageModelChatMessage.User(reviewSections.join('\n\n'))
+        ];
 
-        const options: vscode.LanguageModelChatRequestOptions = {
-            justification: '需要访问仓库上下文以进行全面的代码审查'
+        const reviewOptions: vscode.LanguageModelChatRequestOptions = {
+            justification: '需要访问整理后的 diff 以完成审查'
         };
 
         try {
-            const response = await request.model.sendRequest(messages, options, token);
-            log('已发送请求至模型');
+            const response = await request.model.sendRequest(reviewMessages, reviewOptions, token);
+            log('已发送审查请求至模型');
             let htmlContent = '';
             for await (const fragment of response.text) {
                 htmlContent += fragment;
