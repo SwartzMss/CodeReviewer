@@ -1,12 +1,11 @@
-# Code Reviewer
+# 个性化代码审查助手
 
 一个支持个性化指令的 VS Code 插件，可按需调整检查清单、过滤路径并自动使用 AI 审查你的最新 Git 提交，输出 JSON/HTML 双格式的审查结果。
 
 ## 功能特点
 
 - **一键审查**：自动审查最新的 Git 提交
-- **Diff 托管**：直接委托 Copilot 运行 `git diff` 与 `git diff --name-only`，扩展负责提供过滤规则与检查清单
-- **双阶段对话**：第一轮让模型打印过滤后的 diff，第二轮再基于该输出进行正式审查
+- **Diff 可见性**：先列出所有变更文件及排除项，并在系统临时目录写入文件概览 JSON
 - **默认检查清单**：未配置 `checklistFiles` 时自动使用内置检查清单
 - **JSON 输出**：结构化的审查结果，易于解析
 - **AI 驱动**：使用 GitHub Copilot 进行智能代码分析
@@ -51,13 +50,14 @@
 ## 基本实现流程
 
 1. 在 Copilot Chat 输入 `@CodeReview`（可附带额外说明）。
-2. 扩展根据配置准备排除规则与检查清单，并先发起 **第一轮对话**，指示 Copilot 运行 `git diff`/`git diff --name-only`、过滤文件并打印结果。
-3. 扩展把第一轮输出回传给模型，发起 **第二轮对话**，指导其依据整理好的 diff 完成代码审查。
-4. 将模型的最终响应直接输出到聊天窗口，并把 HTML 报告写入工作区。
+2. 扩展执行 `git diff HEAD~1`，列举 diff 中涉及的所有文件，显示被过滤的路径，同时将 `included/excluded/all` 信息写入临时 JSON（`/tmp/code-review-files-*.json`）。
+3. 根据配置决定使用自定义或默认检查清单，并在聊天窗口提示当前使用的清单。
+4. 构建提示词（包含 diff、检查清单与输出格式），调用 Copilot 让模型返回 JSON 审查意见。
+5. 将模型的流式响应直接输出到聊天窗口，并把最终 HTML 报告写入工作区。
 
 ### 实现要点
 
-- 缺少 workspace 时会友好提示并提前返回。
+- 缺少 workspace 或 diff 为空时会友好提示并提前返回。
 - 通过 `options.justification` 允许模型访问仓库上下文。
 - 捕获 git/模型调用异常并提示用户。
 
@@ -65,7 +65,7 @@
 
 ```
 code-reviewer/
-├── src/extension.ts       # 核心逻辑，组织 prompt 并交由模型自行运行 diff
+├── src/extension.ts       # 核心逻辑，读取 diff 并发送请求
 ├── dist/extension.js      # 编译产物
 ├── scripts/               # 打包脚本
 ├── package.json
