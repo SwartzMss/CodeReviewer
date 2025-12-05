@@ -1,13 +1,13 @@
 # Code Reviewer
 
-一个支持个性化指令的 VS Code 插件，可按需调整检查清单、过滤路径并自动使用 AI 审查你的最新 Git 提交，输出 JSON/HTML 双格式的审查结果。
+一个支持个性化指令的 VS Code 插件，可按需调整检查清单、过滤路径并自动使用 AI 审查你的最新 Git 提交，输出 HTML 表格格式的审查结果。
 
 ## 功能特点
 
 - **一键审查**：自动审查最新的 Git 提交
 - **Diff 可见性**：先列出所有变更文件及排除项，并在系统临时目录写入文件概览 JSON
 - **默认检查清单**：未配置 `checklistFiles` 时自动使用内置检查清单
-- **JSON 输出**：结构化的审查结果，易于解析
+- **HTML 输出**：结构化的审查结果，易于在聊天和报告中直接查看
 - **AI 驱动**：使用 GitHub Copilot 进行智能代码分析
 
 ## 使用方法
@@ -24,27 +24,12 @@
 
 ## 输出示例
 
-```json
-{
-  "comments": {
-    "src/index.ts": [
-      {
-        "line": "+function processData(data) {",
-        "message": "[Major] 缺少参数类型注解"
-      },
-      {
-        "line": "+  return data.value;",
-        "message": "[Critical] 可能的空指针：data 未检查是否为 undefined"
-      }
-    ],
-    "src/utils.ts": [
-      {
-        "line": "+const result = await fetch(url);",
-        "message": "[Major] 缺少错误处理机制"
-      }
-    ]
-  }
-}
+```html
+<table>
+  <tr><th>file</th><th>line</th><th>severity</th><th>message</th></tr>
+  <tr><td>src/index.ts</td><td>10</td><td>ERROR</td><td>空指针风险：data 未检查是否为 undefined</td></tr>
+  <tr><td>src/utils.ts</td><td>27</td><td>WARN</td><td>缺少错误处理或兜底逻辑</td></tr>
+</table>
 ```
 
 ## 基本实现流程
@@ -52,7 +37,7 @@
 1. 在 Copilot Chat 输入 `@CodeReview`（可附带额外说明）。
 2. 扩展执行 `git diff HEAD~1`，列举 diff 中涉及的所有文件，显示被过滤的路径，同时将 `included/excluded/all` 信息写入临时 JSON（`/tmp/code-review-files-*.json`）。
 3. 根据配置决定使用自定义或默认检查清单，并在聊天窗口提示当前使用的清单。
-4. 构建提示词（包含 diff、检查清单与输出格式），调用 Copilot 让模型返回 JSON 审查意见。
+4. 构建提示词（包含 diff、检查清单与输出格式），调用 Copilot 让模型返回 HTML 审查意见。
 5. 将模型的流式响应直接输出到聊天窗口，并把最终 HTML 报告写入工作区。
 
 ### 实现要点
@@ -107,8 +92,8 @@ code --install-extension code-reviewer-0.0.1.vsix
 
 ## FAQ
 
-**Q: 为什么输出的是 JSON 格式？**  
-A: JSON 易于解析，可以集成到 CI/CD 流程或其他工具中。
+**Q: 为什么输出的是 HTML 格式？**  
+A: HTML 表格便于在聊天和生成的报告文件中直接阅读，如需进一步处理可再转换为其他格式。
 
 **Q: 可以审查未提交的修改吗？**  
 A: 当前版本只支持已提交的代码。未提交的修改需要先 commit。
