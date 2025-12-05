@@ -78,11 +78,11 @@ interface TextChunk {
     truncated: boolean;
 }
 
-interface DiffFilterResult {
-    text: string;
+interface DiffFilterSummary {
     includedFiles: string[];
     excludedFiles: string[];
     allFiles: string[];
+    exclusionPatterns: string[];
 }
 
 const DEFAULT_CHECKLIST = `# 默认检查清单
@@ -144,12 +144,12 @@ const shouldExcludeFile = (filePath: string, exclusions: string[]): boolean => {
     });
 };
 
-const filterDiffByPaths = (
+const summarizeDiffByPaths = (
     diffText: string,
     workspacePath: string,
     rawExclusions: string[],
     knownAllFiles: string[] = []
-): DiffFilterResult => {
+): DiffFilterSummary => {
     const exclusions = buildExclusionList(workspacePath, rawExclusions);
     const regex = /^diff --git a\/(.+) b\/(.+)$/gm;
     const matches: { index: number; filePath: string }[] = [];
@@ -158,7 +158,6 @@ const filterDiffByPaths = (
         matches.push({ index: match.index, filePath: match[2] ?? match[1] ?? '' });
     }
 
-    const filteredParts: string[] = [];
     const excludedFiles = new Set<string>();
     const includedFiles = new Set<string>();
     const normalizedKnownFiles = Array.from(
@@ -179,23 +178,7 @@ const filterDiffByPaths = (
         }
     }
 
-    if (!matches.length) {
-        return {
-            text: diffText,
-            excludedFiles: Array.from(excludedFiles),
-            includedFiles: Array.from(includedFiles.size ? includedFiles : allFiles),
-            allFiles: Array.from(allFiles)
-        };
-    }
-
-    if (matches[0].index > 0) {
-        filteredParts.push(diffText.slice(0, matches[0].index));
-    }
-
     for (let i = 0; i < matches.length; i++) {
-        const start = matches[i].index;
-        const end = i + 1 < matches.length ? matches[i + 1].index : diffText.length;
-        const chunk = diffText.slice(start, end);
         const filePath = matches[i].filePath.replace(/\\/g, '/').replace(/^\.\/+/, '');
         allFiles.add(filePath);
 
@@ -205,16 +188,13 @@ const filterDiffByPaths = (
         }
 
         includedFiles.add(filePath);
-        filteredParts.push(chunk);
     }
 
-    const outputText = exclusions.length ? filteredParts.join('') : diffText;
-
     return {
-        text: outputText,
         excludedFiles: Array.from(excludedFiles),
         includedFiles: Array.from(includedFiles.size ? includedFiles : allFiles),
-        allFiles: Array.from(allFiles)
+        allFiles: Array.from(allFiles),
+        exclusionPatterns: exclusions
     };
 };
 
@@ -340,29 +320,29 @@ export function activate(context: vscode.ExtensionContext) {
             return;
         }
 
-        const filteredDiff = filterDiffByPaths(
+        const diffSummary = summarizeDiffByPaths(
             diffChunk.text,
             workspace.uri.fsPath,
             excludePaths,
             diffFiles
         );
-        if (filteredDiff.excludedFiles.length) {
-            log('根据配置排除了部分 diff 文件', filteredDiff.excludedFiles);
+        if (diffSummary.excludedFiles.length) {
+            log('根据配置排除了部分 diff 文件（交由模型忽略）', diffSummary.excludedFiles);
         }
 
-        if (filteredDiff.allFiles.length) {
-            const includedList = filteredDiff.includedFiles.length
-                ? filteredDiff.includedFiles.map(file => `- ${file}`).join('\n')
+        if (diffSummary.allFiles.length) {
+            const includedList = diffSummary.includedFiles.length
+                ? diffSummary.includedFiles.map(file => `- ${file}`).join('\n')
                 : '- （无）';
-            const excludedList = filteredDiff.excludedFiles.length
-                ? filteredDiff.excludedFiles.map(file => `- ${file}`).join('\n')
+            const excludedList = diffSummary.excludedFiles.length
+                ? diffSummary.excludedFiles.map(file => `- ${file}`).join('\n')
                 : '- （无）';
             const summaryMarkdown = [
                 '### Diff 文件概览',
-                `- 总文件数：${filteredDiff.allFiles.length}`,
-                `- 参与审查（${filteredDiff.includedFiles.length}）：`,
+                `- 总文件数：${diffSummary.allFiles.length}`,
+                `- 参与审查（${diffSummary.includedFiles.length}）：`,
                 includedList,
-                `- 已排除（${filteredDiff.excludedFiles.length}）：`,
+                `- 已排除（${diffSummary.excludedFiles.length}）：`,
                 excludedList
             ].join('\n');
             stream.markdown(summaryMarkdown);
@@ -373,9 +353,10 @@ export function activate(context: vscode.ExtensionContext) {
         const summaryPayload = {
             generatedAt: new Date().toISOString(),
             workspace: workspace.uri.fsPath,
-            allFiles: filteredDiff.allFiles,
-            includedFiles: filteredDiff.includedFiles,
-            excludedFiles: filteredDiff.excludedFiles
+            allFiles: diffSummary.allFiles,
+            includedFiles: diffSummary.includedFiles,
+            excludedFiles: diffSummary.excludedFiles,
+            exclusionPatterns: diffSummary.exclusionPatterns
         };
         const summaryFilePath = path.join(
             os.tmpdir(),
@@ -390,13 +371,17 @@ export function activate(context: vscode.ExtensionContext) {
             log('写入临时文件失败', message);
         }
 
-        diffChunk = { text: filteredDiff.text, truncated: diffChunk.truncated };
+        if (!diffSummary.includedFiles.length) {
+            const message = diffSummary.exclusionPatterns.length
+                ? '所有 diff 文件都匹配 codeReviewer.excludePaths 配置，已跳过审查。'
+                : '未检测到需要审查的 diff 文件。';
+            stream.markdown(message);
+            log('没有可供审查的 diff 文件，跳过。');
+            return;
+        }
 
         if (!diffChunk.text.trim()) {
-            const message = excludePaths.length
-                ? '未检测到有效差异：所有更改都匹配 codeReviewer.excludePaths 配置。'
-                : '未检测到最近一次提交的差异，请确认有新的更改后再试。';
-            stream.markdown(message);
+            stream.markdown('未检测到最近一次提交的差异，请确认有新的更改后再试。');
             log('有效 diff 为空');
             return;
         }
@@ -423,6 +408,41 @@ export function activate(context: vscode.ExtensionContext) {
             '你是一名资深且严谨的代码审查专家，需要针对最新一次提交给出结构化 JSON 反馈。',
             '请审查最新一次 Git 提交（`git diff HEAD~1`）并以 JSON 返回审查结果。'
         ];
+
+        sections.push(
+            '### 文件过滤与整理规则',
+            '在阅读 diff 前，请先根据以下要求整理出需要审查的文件：',
+            '1. 仅对 `includedFiles` 中列出的文件给出审查意见；',
+            '2. `excludedFiles` 中的文件由配置排除，只能作为上下文，必须忽略其缺陷；',
+            '3. 如果 diff 中出现不在 `allFiles` 列表中的文件，可视为额外上下文，仍需先判断其是否匹配排除模式。'
+        );
+
+        if (diffSummary.exclusionPatterns.length) {
+            sections.push(
+                '当前排除模式（相对工作区根目录）：',
+                '```json',
+                JSON.stringify(diffSummary.exclusionPatterns, null, 2),
+                '```'
+            );
+        } else {
+            sections.push('当前未配置额外的排除模式。');
+        }
+
+        sections.push(
+            '以下为此次 diff 的文件分类，请先据此整理：',
+            '```json',
+            JSON.stringify(
+                {
+                    allFiles: diffSummary.allFiles,
+                    includedFiles: diffSummary.includedFiles,
+                    excludedFiles: diffSummary.excludedFiles
+                },
+                null,
+                2
+            ),
+            '```',
+            '整理完成后再进入正式审查流程。'
+        );
 
         if (diffContainsCppChanges(diffChunk.text)) {
             sections.push(
