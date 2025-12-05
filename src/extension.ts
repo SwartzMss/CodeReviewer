@@ -147,7 +147,8 @@ const shouldExcludeFile = (filePath: string, exclusions: string[]): boolean => {
 const filterDiffByPaths = (
     diffText: string,
     workspacePath: string,
-    rawExclusions: string[]
+    rawExclusions: string[],
+    knownAllFiles: string[] = []
 ): DiffFilterResult => {
     const exclusions = buildExclusionList(workspacePath, rawExclusions);
     const regex = /^diff --git a\/(.+) b\/(.+)$/gm;
@@ -157,14 +158,35 @@ const filterDiffByPaths = (
         matches.push({ index: match.index, filePath: match[2] ?? match[1] ?? '' });
     }
 
-    if (!matches.length) {
-        return { text: diffText, excludedFiles: [], includedFiles: [], allFiles: [] };
-    }
-
     const filteredParts: string[] = [];
     const excludedFiles = new Set<string>();
     const includedFiles = new Set<string>();
-    const allFiles = new Set<string>();
+    const normalizedKnownFiles = Array.from(
+        new Set(
+            knownAllFiles
+                .map(file => file?.trim())
+                .filter((file): file is string => Boolean(file))
+                .map(file => file.replace(/\\/g, '/').replace(/^\.\/+/, ''))
+        )
+    );
+    const allFiles = new Set<string>(normalizedKnownFiles);
+
+    for (const file of normalizedKnownFiles) {
+        if (shouldExcludeFile(file, exclusions)) {
+            excludedFiles.add(file);
+        } else {
+            includedFiles.add(file);
+        }
+    }
+
+    if (!matches.length) {
+        return {
+            text: diffText,
+            excludedFiles: Array.from(excludedFiles),
+            includedFiles: Array.from(includedFiles.size ? includedFiles : allFiles),
+            allFiles: Array.from(allFiles)
+        };
+    }
 
     if (matches[0].index > 0) {
         filteredParts.push(diffText.slice(0, matches[0].index));
@@ -174,7 +196,7 @@ const filterDiffByPaths = (
         const start = matches[i].index;
         const end = i + 1 < matches.length ? matches[i + 1].index : diffText.length;
         const chunk = diffText.slice(start, end);
-        const filePath = matches[i].filePath.replace(/^\.\/+/, '');
+        const filePath = matches[i].filePath.replace(/\\/g, '/').replace(/^\.\/+/, '');
         allFiles.add(filePath);
 
         if (shouldExcludeFile(filePath, exclusions)) {
@@ -243,6 +265,23 @@ const loadGitDiff = async (cwd: string): Promise<TextChunk> => {
     }
 };
 
+const loadDiffFileList = async (cwd: string): Promise<string[]> => {
+    try {
+        const { stdout } = await execAsync('git diff --name-only HEAD~1', {
+            cwd,
+            maxBuffer: 1 * 1024 * 1024
+        });
+        return stdout
+            .split('\n')
+            .map(line => line.trim())
+            .filter(Boolean)
+            .map(line => line.replace(/\\/g, '/').replace(/^\.\/+/, ''));
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`无法获取 Git diff 文件列表：${message}`);
+    }
+};
+
 const diffContainsCppChanges = (diffText: string): boolean => {
     const matches = diffText.match(/^\+\+\+ b\/(.+)$/gm);
     if (!matches) {
@@ -288,16 +327,25 @@ export function activate(context: vscode.ExtensionContext) {
         const excludePaths = configuration.get<string[]>('excludePaths') ?? [];
 
         let diffChunk: TextChunk;
+        let diffFiles: string[];
         try {
-            diffChunk = await loadGitDiff(workspace.uri.fsPath);
+            [diffChunk, diffFiles] = await Promise.all([
+                loadGitDiff(workspace.uri.fsPath),
+                loadDiffFileList(workspace.uri.fsPath)
+            ]);
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             stream.markdown(message);
-            log('git diff 获取失败', message);
+            log('git diff 数据获取失败', message);
             return;
         }
 
-        const filteredDiff = filterDiffByPaths(diffChunk.text, workspace.uri.fsPath, excludePaths);
+        const filteredDiff = filterDiffByPaths(
+            diffChunk.text,
+            workspace.uri.fsPath,
+            excludePaths,
+            diffFiles
+        );
         if (filteredDiff.excludedFiles.length) {
             log('根据配置排除了部分 diff 文件', filteredDiff.excludedFiles);
         }
