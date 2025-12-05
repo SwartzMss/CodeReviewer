@@ -8,6 +8,69 @@ const execAsync = promisify(exec);
 const log = (...args: unknown[]) => console.log('[CodeReview]', ...args);
 const MAX_DIFF_CHARS = 60_000;
 const MAX_CHECKLIST_CHARS = 20_000;
+const CPP_FILE_EXTENSIONS = ['.cc', '.cpp', '.cxx', '.h', '.hh', '.hpp', '.hxx'];
+const CPP_REVIEW_GUIDELINES = `# Role: C++ Code Reviewer
+
+## Profile
+- Author: C++ Expert
+- Version: 1.0
+- Language: English
+- Description: A meticulous C++ code reviewer specialized in identifying potential risks, design considerations, and promoting modern C++ best practices for high-performance computing environments.
+
+## Skills
+- Deep understanding of C++ memory management mechanisms including manual allocation, RAII, and smart pointers
+- Expert knowledge in multithreaded programming and concurrent data structures
+- Proficiency in modern C++ standards (C++17/20/23) and their safety features
+- Strong analytical abilities to identify potential runtime issues in complex codebases
+- Clear communication skills to explain technical issues and recommend improvements
+- Experience with performance optimization techniques for C++ applications
+
+## Goals:
+- Thoroughly analyze provided C++ code for memory safety vulnerabilities
+- Identify potential thread safety issues in multithreaded environments
+- Detect design flaws related to context management, especially in single-threaded callback scenarios
+- Detect incorrect or ineffective control logic
+- Evaluate code against modern C++ best practices and design patterns
+- Provide detailed, structured feedback on identified issues with clear explanations
+- Suggest specific improvements to enhance code safety, performance, and maintainability
+
+## Issue Severity Levels
+- **Critical**: Code that may cause crashes, memory corruption, security vulnerabilities, or undefined behavior. Must be fixed immediately.
+- **Major**: Code that may lead to performance degradation, thread-safety issues, or maintainability concerns. Should be addressed before merging.
+- **Minor**: Style issues, non-critical optimizations, or improvements that can be deferred.
+
+## Rules:
+- Focus analysis specifically on memory safety, thread safety, control logic, design flaw and modern C++ best practices
+- The **Solution** for each issue MUST align with the defined **Remediation Strategy**.
+- Provide **concrete examples** and explanations rather than vague criticisms. Ensure all comments are precise and well-supported.
+- Maintain a professional, technical tone throughout the review.
+- Below **Memory Safety** issues MUST be flagged as **Critical** severity:
+  - Any cases that could lead to memory corruption, crashes or exceptions (e.g., buffer overflows, invalid memory access, use-after-free, double free, memory leaks, dangling pointers or references, etc.)
+  - Any implicit assumptions that could lead to undefined behavior or unsafe access patterns
+- **Do NOT** flag ordering dependencies in constructors or setup functions like \`setUp\`, even if calls must happen in sequence. Assume correctness unless there is evidence of race conditions or external non-determinism.
+- **DO NOT** recommend synchronization (e.g., mutex or atomic) for variable access in clearly single-threaded contexts where race conditions are impossible.
+- Avoid speculative assumptions about the multithreading or concurrency execution context **unless** there is concrete evidence in the code or documentation (e.g. [multithreaded] tagged).
+- Base all **Thread Safety** analysis on concrete, observable evidence — speculative or hypothetical concerns are **NOT Allowed**.
+- All **Queue** objects (e.g., \`SyncTaskQueue\`, \`MessageQueue\` etc.) are **thread-safe** by design, and their internal state is **always consistent** when accessed through their public APIs.
+- If a member variable is initialized during construction (e.g., via constructor body or initializer list), **Do NOT** comment on potential null pointer dereference or validity checks when that variable is used later, unless there is evidence of reassignment or lifetime mismatch. Assume the constructor guarantees its validity.
+
+## Review Workflow:
+1. Carefully analyze the given C++ code. Break it into logical segments (or by provided functions), and for each part:
+2. Document your thought process in a detailed, stream-of-consciousness style.
+3. Examine the code for **Memory Safety** issues. Specifically, identify:
+4. Analyze the code for **Thread Safety** concerns. In particular, identify and explain:
+5. Merge all valid review comments into a consolidated output.
+6. Organize findings into a structured review following the specified format, clearly separating the thinking process from the formal review.
+7. Provide specific, actionable recommendations for each identified issue, explaining both the problem and potential solutions.
+8. For each comments, please mark it as [Critical],[Major],[Minor] at the begining of the comment message.
+
+## Remediation Strategy
+- Propose hierarchical fixes: immediate mitigation → proper resolution → ideal implementation
+- Include complete Before/After code examples using standard C++ idioms
+- Explain solution rationale with references to language features or design patterns
+- Ensure that all potential side effects of the proposed changes are thoroughly considered and explicitly addressed
+- For complex issues (e.g., related to Design of Context Management), provide a clear, complete, working solution
+- Prioritize issues by severity within their category and focus on concrete, actionable recommendations`;
 
 interface TextChunk {
     text: string;
@@ -68,6 +131,24 @@ const loadGitDiff = async (cwd: string): Promise<TextChunk> => {
     }
 };
 
+const diffContainsCppChanges = (diffText: string): boolean => {
+    const matches = diffText.match(/^\+\+\+ b\/(.+)$/gm);
+    if (!matches) {
+        return false;
+    }
+
+    for (const line of matches) {
+        const filePath = line.replace(/^\+\+\+ b\//, '').split('\t')[0];
+        if (filePath === '/dev/null') {
+            continue;
+        }
+        if (CPP_FILE_EXTENSIONS.some(ext => filePath.endsWith(ext))) {
+            return true;
+        }
+    }
+    return false;
+};
+
 export function activate(context: vscode.ExtensionContext) {
     const reviewer = async (
         request: vscode.ChatRequest,
@@ -115,12 +196,17 @@ export function activate(context: vscode.ExtensionContext) {
 
         const sections: string[] = [
             '你是一名资深且严谨的代码审查专家，需要针对最新一次提交给出结构化 JSON 反馈。',
-            '请审查最新一次 Git 提交（`git diff HEAD~1`）并以 JSON 返回审查结果。',
-            'Diff 如下：',
-            '```diff',
-            diffChunk.text,
-            '```'
+            '请审查最新一次 Git 提交（`git diff HEAD~1`）并以 JSON 返回审查结果。'
         ];
+
+        if (diffContainsCppChanges(diffChunk.text)) {
+            sections.push(
+                '若 Diff 中包含 C++ 文件，请默认遵循以下审查标准：',
+                CPP_REVIEW_GUIDELINES
+            );
+        }
+
+        sections.push('Diff 如下：', '```diff', diffChunk.text, '```');
 
         if (checklistChunks.length) {
             sections.push('以下是需要优先关注的审查检查清单：');
