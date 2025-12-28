@@ -1,4 +1,4 @@
-# Code Reviewer
+# Swartz Code Review
 
 一个支持个性化指令的 VS Code 插件，可按需调整检查清单、过滤路径并自动使用 AI 审查你的最新 Git 提交，输出 HTML 表格格式的审查结果。
 
@@ -14,13 +14,13 @@
 
 在 Copilot Chat 中输入：
 ```
-@CodeReview
+@SwartzCodeReview
 ```
 
 ## 可选配置
 
-- `codeReviewer.checklistFiles`：附加到提示中的检查清单文件列表，支持相对或绝对路径；若留空则会自动应用内置默认清单。
-- `codeReviewer.excludePaths`：需要从 `git diff` 中排除的文件或目录路径，支持多个条目；目录会匹配其下的所有文件。
+- `swartzCodeReview.checklistFiles`：附加到提示中的检查清单文件列表，支持相对或绝对路径；若留空则会自动应用内置默认清单。
+- `swartzCodeReview.excludePaths`：需要从 `git diff` 中排除的文件或目录路径，支持多个条目；目录会匹配其下的所有文件。
 
 ## 输出示例
 
@@ -34,8 +34,8 @@
 
 ## 基本实现流程
 
-1. 在 Copilot Chat 输入 `@CodeReview`（可附带额外说明）。
-2. 扩展执行 `git diff HEAD~1`，列举 diff 中涉及的所有文件，显示被过滤的路径，同时将 `included/excluded/all` 信息写入临时 JSON（`/tmp/code-review-files-*.json`）。
+1. 在 Copilot Chat 输入 `@SwartzCodeReview`（可附带额外说明）。
+2. 扩展执行 `git diff HEAD~1`，列举 diff 中涉及的所有文件，显示被过滤的路径，同时将 `included/excluded/all` 信息写入临时 JSON（`/tmp/swartz-code-review-files-*.json`）。
 3. 根据配置决定使用自定义或默认检查清单，并在聊天窗口提示当前使用的清单。
 4. 构建提示词（包含 diff、检查清单与输出格式），调用 Copilot 让模型返回 HTML 审查意见。
 5. 将模型的流式响应直接输出到聊天窗口，并把最终 HTML 报告写入工作区。
@@ -49,7 +49,7 @@
 ### 项目结构
 
 ```
-code-reviewer/
+swartz-code-review/
 ├── src/extension.ts       # 核心逻辑，读取 diff 并发送请求
 ├── dist/extension.js      # 编译产物
 ├── scripts/               # 打包脚本
@@ -62,7 +62,7 @@ code-reviewer/
 
 ```bash
 # 1. 克隆或创建项目
-mkdir code-reviewer && cd code-reviewer
+mkdir swartz-code-review && cd swartz-code-review
 
 # 2. 安装依赖
 npm install
@@ -74,16 +74,16 @@ npm run compile
 npm run package
 
 # 5. 安装到 VS Code
-code --install-extension code-reviewer-0.0.1.vsix
+code --install-extension codereviewer.swartz-code-review-0.0.1.vsix
 
 # 6. 测试
 # 在任意 git 仓库中提交代码后，打开 Copilot Chat 输入：
-# @CodeReview
+# @SwartzCodeReview
 ```
 
 ## 调试日志
 
-安装 VSIX 后如果在 Copilot Chat 无法使用 `@CodeReview` 或命令无响应，可通过以下方式查看日志：
+安装 VSIX 后如果在 Copilot Chat 无法使用 `@SwartzCodeReview` 或命令无响应，可通过以下方式查看日志：
 
 - 在 VS Code 中打开 `查看 → 输出`，右上角选择 `Log (Extension Host)`，可以看到扩展激活和注册参与者相关的错误。
 - 按 `Ctrl+Shift+P`，输入 `Developer: Toggle Developer Tools` 打开开发者工具，在 Console 面板查看详细报错。

@@ -1,6 +1,6 @@
 {
-  "name": "code-reviewer",
-  "displayName": "Code Reviewer",
+  "name": "swartz-code-review",
+  "displayName": "Swartz Code Review",
   "description": "A customizable VS Code chat participant that lists diff files, honors per-user checklists, and asks Copilot to review the latest Git commit using MCP.",
   "version": "0.0.1",
   "publisher": "codereviewer",
@@ -14,15 +14,15 @@
     "Other"
   ],
   "activationEvents": [
-    "onChatParticipant:CodeReview"
+    "onChatParticipant:SwartzCodeReview"
   ],
   "main": "dist/extension.js",
   "contributes": {
     "chatParticipants": [
       {
-        "id": "CodeReview",
-        "name": "CodeReview",
-        "fullName": "Code Review",
+        "id": "SwartzCodeReview",
+        "name": "SwartzCodeReview",
+        "fullName": "Swartz Code Review",
         "description": "AI 代码审查助手",
         "commands": [
           {
@@ -33,9 +33,9 @@
       }
     ],
     "configuration": {
-      "title": "Code Reviewer",
+      "title": "Swartz Code Review",
       "properties": {
-        "codeReviewer.checklistFiles": {
+        "swartzCodeReview.checklistFiles": {
           "type": "array",
           "markdownDescription": "要附加到审查提示中的检查清单文件路径列表，支持相对工作区或绝对路径，建议使用 Markdown。",
           "items": {
@@ -43,7 +43,7 @@
           },
           "default": []
         },
-        "codeReviewer.excludePaths": {
+        "swartzCodeReview.excludePaths": {
           "type": "array",
           "markdownDescription": "需要从 git diff 中排除的文件或目录路径列表，支持相对工作区或绝对路径；目录会匹配其下的所有文件。",
           "items": {

@@ -6,7 +6,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);
-const log = (...args: unknown[]) => console.log('[CodeReview]', ...args);
+const log = (...args: unknown[]) => console.log('[SwartzCodeReview]', ...args);
 const MAX_DIFF_CHARS = 60_000;
 const MAX_CHECKLIST_CHARS = 20_000;
 const CPP_FILE_EXTENSIONS = ['.cc', '.cpp', '.cxx', '.h', '.hh', '.hpp', '.hxx'];
@@ -322,7 +322,7 @@ export function activate(context: vscode.ExtensionContext) {
             return;
         }
 
-        const configuration = vscode.workspace.getConfiguration('codeReviewer');
+        const configuration = vscode.workspace.getConfiguration('swartzCodeReview');
         const checklistFiles = configuration.get<string[]>('checklistFiles') ?? [];
         const excludePaths = configuration.get<string[]>('excludePaths') ?? [];
 
@@ -379,7 +379,7 @@ export function activate(context: vscode.ExtensionContext) {
         };
         const summaryFilePath = path.join(
             os.tmpdir(),
-            `code-review-files-${Date.now()}.json`
+            `swartz-code-review-files-${Date.now()}.json`
         );
         try {
             await fs.writeFile(summaryFilePath, JSON.stringify(summaryPayload, null, 2), 'utf8');
@@ -394,7 +394,7 @@ export function activate(context: vscode.ExtensionContext) {
 
         if (!diffChunk.text.trim()) {
             const message = excludePaths.length
-                ? '未检测到有效差异：所有更改都匹配 codeReviewer.excludePaths 配置。'
+                ? '未检测到有效差异：所有更改都匹配 swartzCodeReview.excludePaths 配置。'
                 : '未检测到最近一次提交的差异，请确认有新的更改后再试。';
             stream.markdown(message);
             log('有效 diff 为空');
@@ -478,7 +478,7 @@ export function activate(context: vscode.ExtensionContext) {
                 htmlContent += fragment;
             }
 
-            const fileName = `code-review-report-${Date.now()}.html`;
+            const fileName = `swartz-code-review-report-${Date.now()}.html`;
             const filePath = path.join(workspace.uri.fsPath, fileName);
 
             try {
@@ -497,7 +497,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
     };
 
-    const participant = vscode.chat.createChatParticipant('CodeReview', reviewer);
+    const participant = vscode.chat.createChatParticipant('SwartzCodeReview', reviewer);
     context.subscriptions.push(participant);
 }
 
